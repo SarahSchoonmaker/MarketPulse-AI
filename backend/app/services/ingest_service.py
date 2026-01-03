@@ -1,9 +1,8 @@
 from __future__ import annotations
 from sqlalchemy.orm import Session
 from datetime import datetime
-from typing import List
 from ..models import Symbol, PriceBar
-from ..core.alpha_vantage import fetch_daily_adjusted
+from ..core.alpha_vantage import fetch_daily  
 
 def get_or_create_symbol(db: Session, ticker: str) -> Symbol:
     sym = db.query(Symbol).filter(Symbol.ticker == ticker.upper()).one_or_none()
@@ -17,9 +16,9 @@ def get_or_create_symbol(db: Session, ticker: str) -> Symbol:
 
 def ingest_daily(db: Session, ticker: str, timeframe: str = "1d") -> int:
     sym = get_or_create_symbol(db, ticker)
-    payload = fetch_daily_adjusted(sym.ticker)
+    payload = fetch_daily(sym.ticker)        
     series = payload["Time Series (Daily)"]
-    # insert most recent 200-ish points (compact). We'll upsert by unique constraint.
+
     inserted = 0
     for day_str, row in series.items():
         ts = datetime.fromisoformat(day_str)
@@ -31,17 +30,16 @@ def ingest_daily(db: Session, ticker: str, timeframe: str = "1d") -> int:
             high=float(row["2. high"]),
             low=float(row["3. low"]),
             close=float(row["4. close"]),
-            volume=float(row["6. volume"]) if "6. volume" in row else None,
+            volume=float(row["5. volume"]) if "5. volume" in row else None,  
             source="alphavantage",
         )
-        # upsert: try insert, if exists skip
         try:
             db.add(bar)
             db.flush()
             inserted += 1
         except Exception:
             db.rollback()
-            # existing row - skip
             continue
+
     db.commit()
     return inserted

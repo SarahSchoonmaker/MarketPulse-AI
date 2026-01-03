@@ -1,29 +1,33 @@
 import requests
-from typing import Any, Dict
 from .config import settings
+
+class AlphaVantageError(Exception):
+    pass
 
 BASE_URL = "https://www.alphavantage.co/query"
 
-class AlphaVantageError(RuntimeError):
-    pass
-
-def fetch_daily_adjusted(ticker: str) -> Dict[str, Any]:
-    if not settings.alphavantage_api_key:
-        raise AlphaVantageError("ALPHAVANTAGE_API_KEY is not set.")
+def fetch_daily(symbol: str) -> dict:
     params = {
-        "function": "TIME_SERIES_DAILY_ADJUSTED",
-        "symbol": ticker,
+        "function": "TIME_SERIES_DAILY",  
+        "symbol": symbol,
         "outputsize": "compact",
         "apikey": settings.alphavantage_api_key,
     }
-    r = requests.get(BASE_URL, params=params, timeout=30)
-    r.raise_for_status()
-    data = r.json()
+
+    resp = requests.get(BASE_URL, params=params, timeout=30)
+    data = resp.json()
+
+    # --- Graceful error handling ---
     if "Error Message" in data:
         raise AlphaVantageError(data["Error Message"])
+
     if "Note" in data:
-        # rate limit
-        raise AlphaVantageError(data["Note"])
+        raise AlphaVantageError(f"Rate limit hit: {data['Note']}")
+
+    if "Information" in data:
+        raise AlphaVantageError(f"Info: {data['Information']}")
+
     if "Time Series (Daily)" not in data:
-        raise AlphaVantageError(f"Unexpected Alpha Vantage response keys: {list(data.keys())}")
+        raise AlphaVantageError(f"Unexpected response keys: {list(data.keys())}")
+
     return data

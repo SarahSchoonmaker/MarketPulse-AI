@@ -1,38 +1,49 @@
-import time
+import os
 from openai import OpenAI
-from .config import settings
 
-client = OpenAI(api_key=settings.openai_api_key)
+# Hugging Face token (fine-grained, inference only)
+HF_TOKEN = os.getenv("HF_TOKEN")
+if not HF_TOKEN:
+    raise RuntimeError("HF_TOKEN not set in environment")
 
-class OpenAIError(RuntimeError):
+# OpenAI-compatible client pointed at Hugging Face router
+client = OpenAI(
+    base_url="https://router.huggingface.co/v1",
+    api_key=HF_TOKEN,
+)
+
+class LLMError(Exception):
     pass
 
-def chat_json(system: str, user: str) -> tuple[dict, dict]:
-    """Returns (json_obj, meta)."""
-    if not settings.openai_api_key:
-        raise OpenAIError("OPENAI_API_KEY is not set.")
-    t0 = time.time()
-    resp = client.chat.completions.create(
-        model=settings.openai_model,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.2,
-    )
-    dt = int((time.time() - t0) * 1000)
-    msg = resp.choices[0].message.content
-    import json
+
+def chat_json(
+    system_prompt: str,
+    user_prompt: str,
+    model: str = "moonshotai/Kimi-K2-Instruct-0905",
+):
+    """
+    Returns:
+        (json_text: str, meta: dict)
+    """
     try:
-        obj = json.loads(msg)
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
+        )
     except Exception as e:
-        raise OpenAIError(f"Model did not return valid JSON: {e}. Raw: {msg[:500]}")
+        raise LLMError(f"HF inference error: {e}")
+
+    content = resp.choices[0].message.content
+    if not content:
+        raise LLMError("Empty LLM response")
+
     meta = {
-        "model": resp.model,
-        "latency_ms": dt,
-        "prompt_tokens": getattr(resp.usage, "prompt_tokens", None),
-        "completion_tokens": getattr(resp.usage, "completion_tokens", None),
-        "total_tokens": getattr(resp.usage, "total_tokens", None),
+        "provider": "huggingface",
+        "model": model,
     }
-    return obj, meta
+
+    return content, meta
